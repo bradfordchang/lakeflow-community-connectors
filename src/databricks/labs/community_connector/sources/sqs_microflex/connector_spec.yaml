@@ -1,0 +1,54 @@
+# SQS Microflex Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: SQS Microflex
+connection:
+  parameters:
+    - name: aws_access_key_id
+      type: string
+      required: true
+      secret: false
+      description: >
+        AWS IAM access key ID for authentication with AWS SQS.
+        This is a public identifier (e.g., AKIA...) but should be treated as sensitive.
+        Obtain this from your AWS IAM console.
+
+    - name: aws_secret_access_key
+      type: string
+      required: true
+      secret: true
+      description: >
+        AWS IAM secret access key corresponding to the access key ID.
+        This is a sensitive credential that must be kept secure and never exposed.
+        Obtain this from your AWS IAM console when creating the access key.
+
+    - name: aws_region
+      type: string
+      required: true
+      description: >
+        AWS region where the SQS queues are located (e.g., us-east-1, eu-west-1, ap-southeast-1).
+        Each connector instance targets a single region. For multi-region support,
+        create separate connector instances.
+
+    - name: aws_session_token
+      type: string
+      required: false
+      secret: true
+      description: >
+        AWS session token for temporary credentials obtained via AWS STS (Security Token Service).
+        This is required only when using assumed roles or federated identities.
+        Leave empty for standard IAM user access keys.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# If no table-specific options are needed, set to empty string or omit.
+# ============================================================================
+external_options_allowlist: ""
