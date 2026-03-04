@@ -30,18 +30,23 @@ class SqsMicroflexLakeflowConnect(LakeflowConnect):
 
     def __init__(self, options: dict[str, str]) -> None:
         super().__init__(options)
+        self._client = None
 
-        client_kwargs = {
-            "service_name": "sqs",
-            "region_name": options["aws_region"],
-            "aws_access_key_id": options["aws_access_key_id"],
-            "aws_secret_access_key": options["aws_secret_access_key"],
-        }
-        session_token = options.get("aws_session_token")
-        if session_token:
-            client_kwargs["aws_session_token"] = session_token
-
-        self._client = boto3.client(**client_kwargs)
+    @property
+    def client(self):
+        """Lazily create the boto3 SQS client to avoid pickling thread locks."""
+        if self._client is None:
+            client_kwargs = {
+                "service_name": "sqs",
+                "region_name": self.options["aws_region"],
+                "aws_access_key_id": self.options["aws_access_key_id"],
+                "aws_secret_access_key": self.options["aws_secret_access_key"],
+            }
+            session_token = self.options.get("aws_session_token")
+            if session_token:
+                client_kwargs["aws_session_token"] = session_token
+            self._client = boto3.client(**client_kwargs)
+        return self._client
 
     # ------------------------------------------------------------------
     # Interface methods
@@ -106,7 +111,7 @@ class SqsMicroflexLakeflowConnect(LakeflowConnect):
         params = {"MaxResults": 100}
 
         while True:
-            resp = self._call_with_retry(self._client.list_queues, **params)
+            resp = self._call_with_retry(self.client.list_queues, **params)
             queue_urls.extend(resp.get("QueueUrls", []))
             next_token = resp.get("NextToken")
             if not next_token:
@@ -124,7 +129,7 @@ class SqsMicroflexLakeflowConnect(LakeflowConnect):
         records = []
         for queue_url in queue_urls:
             resp = self._call_with_retry(
-                self._client.get_queue_attributes,
+                self.client.get_queue_attributes,
                 QueueUrl=queue_url,
                 AttributeNames=["All"],
             )
@@ -187,7 +192,7 @@ class SqsMicroflexLakeflowConnect(LakeflowConnect):
         """Receive all currently visible messages from a single queue."""
         while True:
             resp = self._call_with_retry(
-                self._client.receive_message,
+                self.client.receive_message,
                 QueueUrl=queue_url,
                 MaxNumberOfMessages=10,
                 MessageSystemAttributeNames=["All"],
