@@ -1,5 +1,5 @@
-# SQS Microflex Community Connector Spec
-# This file defines the specification for the connector including
+# sqs_microflex Community Connector Spec
+# This file defines the specification for the SQS Microflex connector including
 # connection parameters and allowlist options.
 
 # ============================================================================
