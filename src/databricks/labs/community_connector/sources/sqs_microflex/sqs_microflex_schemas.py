@@ -177,10 +177,10 @@ def parse_message(msg: dict, queue_url: str) -> dict:
         serialized_attrs = json.dumps(simplified)
 
     sent_ts_raw = sys_attrs.get("SentTimestamp")
-    sent_ts = int(sent_ts_raw) if sent_ts_raw else None
+    sent_ts = int(sent_ts_raw) / 1000.0 if sent_ts_raw else None
 
     first_recv_raw = sys_attrs.get("ApproximateFirstReceiveTimestamp")
-    first_recv_ts = int(first_recv_raw) if first_recv_raw else None
+    first_recv_ts = int(first_recv_raw) / 1000.0 if first_recv_raw else None
 
     recv_count_raw = sys_attrs.get("ApproximateReceiveCount")
     recv_count = int(recv_count_raw) if recv_count_raw else None
