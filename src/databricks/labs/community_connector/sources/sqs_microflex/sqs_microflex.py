@@ -181,15 +181,18 @@ class SqsMicroflexLakeflowConnect(LakeflowConnect):
             return iter([]), start_offset or {}
 
         end_offset = {"last_sent_timestamp": max_ts}
-        if start_offset and start_offset == end_offset:
-            return iter([]), start_offset
-
         return iter(records), end_offset
 
     def _poll_queue(
         self, queue_url: str, records: list[dict], remaining: int
     ) -> None:
-        """Receive messages from a single queue up to the remaining limit."""
+        """Receive messages from a single queue up to the remaining limit.
+
+        Messages are deleted from SQS after being read so they are not
+        returned again on subsequent polls.  A longer VisibilityTimeout
+        (300 s) is used to prevent other consumers from seeing the same
+        messages while this batch is being processed.
+        """
         while remaining > 0:
             fetch_size = min(10, remaining)
             resp = self._call_with_retry(
@@ -199,12 +202,23 @@ class SqsMicroflexLakeflowConnect(LakeflowConnect):
                 MessageSystemAttributeNames=["All"],
                 MessageAttributeNames=["All"],
                 WaitTimeSeconds=1,
-                VisibilityTimeout=5,
+                VisibilityTimeout=300,
             )
             messages = resp.get("Messages", [])
             if not messages:
                 break
 
+            delete_entries = []
             for msg in messages:
                 records.append(parse_message(msg, queue_url))
+                delete_entries.append(
+                    {"Id": msg["MessageId"], "ReceiptHandle": msg["ReceiptHandle"]}
+                )
                 remaining -= 1
+
+            # Delete the batch from SQS so they are not re-read.
+            self._call_with_retry(
+                self.client.delete_message_batch,
+                QueueUrl=queue_url,
+                Entries=delete_entries,
+            )
