@@ -673,74 +673,72 @@ def register_lakeflow_source(spark):
         # Messages table (append)
         # ------------------------------------------------------------------
 
+        # Maximum messages to read per micro-batch to avoid unbounded polling.
+        MAX_BATCH_SIZE = 1000
+
         def _read_messages(
             self, start_offset: dict, table_options: dict[str, str]
         ) -> tuple[Iterator[dict], dict]:
-            """Read messages from all queues.
+            """Read messages from all queues in bounded batches.
 
             Polling strategy:
             - Discover all queues via ListQueues.
             - For each queue, call ReceiveMessage repeatedly (max 10 per call)
-              until an empty response is returned, which means the queue is
-              drained for this polling cycle.
+              until MAX_BATCH_SIZE is reached or the queue returns no messages.
             - Messages are NOT deleted (non-destructive read).
-            - Deduplication by message_id is handled via a seen-set so duplicate
-              receives within the same batch are dropped.
-            - The offset tracks the set of message_ids already ingested so the
-              framework can detect "no new data" when the returned offset
-              equals the start offset.
+            - The offset tracks the max sent_timestamp seen so the framework
+              can detect progress between batches.
             """
-            seen_ids: set[str] = set()
-            if start_offset:
-                # Rebuild seen-set from the previous offset so we can skip
-                # messages that were already ingested in a prior batch.
-                prev_ids = start_offset.get("seen_ids", [])
-                seen_ids.update(prev_ids)
+            max_batch = int(table_options.get("max_records_per_batch", str(self.MAX_BATCH_SIZE)))
+            last_ts = start_offset.get("last_sent_timestamp", "0") if start_offset else "0"
 
             queue_urls = self._list_all_queue_urls()
 
             records = []
+            max_ts = last_ts
             for queue_url in queue_urls:
-                self._poll_queue(queue_url, records, seen_ids)
+                if len(records) >= max_batch:
+                    break
+                self._poll_queue(queue_url, records, max_batch - len(records))
+                # Track the max sent_timestamp across all records
+                for rec in records:
+                    ts = rec.get("sent_timestamp")
+                    if ts is not None:
+                        ts_str = str(ts)
+                        if ts_str > max_ts:
+                            max_ts = ts_str
 
             if not records:
                 return iter([]), start_offset or {}
 
-            # Build end offset.  We store the union of previously-seen IDs and
-            # newly-seen IDs so that on the next call the framework can detect
-            # "no new data" (start_offset == end_offset).
-            all_seen = list(seen_ids)
-            end_offset = {"seen_ids": all_seen}
-
+            end_offset = {"last_sent_timestamp": max_ts}
             if start_offset and start_offset == end_offset:
                 return iter([]), start_offset
 
             return iter(records), end_offset
 
         def _poll_queue(
-            self, queue_url: str, records: list[dict], seen_ids: set[str]
+            self, queue_url: str, records: list[dict], remaining: int
         ) -> None:
-            """Receive all currently visible messages from a single queue."""
-            while True:
+            """Receive messages from a single queue up to the remaining limit."""
+            while remaining > 0:
+                fetch_size = min(10, remaining)
                 resp = self._call_with_retry(
                     self.client.receive_message,
                     QueueUrl=queue_url,
-                    MaxNumberOfMessages=10,
+                    MaxNumberOfMessages=fetch_size,
                     MessageSystemAttributeNames=["All"],
                     MessageAttributeNames=["All"],
                     WaitTimeSeconds=1,
-                    VisibilityTimeout=30,
+                    VisibilityTimeout=5,
                 )
                 messages = resp.get("Messages", [])
                 if not messages:
                     break
 
                 for msg in messages:
-                    mid = msg["MessageId"]
-                    if mid in seen_ids:
-                        continue
-                    seen_ids.add(mid)
                     records.append(parse_message(msg, queue_url))
+                    remaining -= 1
 
 
     ########################################################
